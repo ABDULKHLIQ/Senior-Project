@@ -1,0 +1,140 @@
+#include <cstdio>
+#include <cstring>
+#include <cmath>
+#include <iostream>
+#include <vector>
+#include <cstdlib>
+#include "mbedtls/aes.h"
+
+// Helper function to print data in hexadecimal format
+void print_hex(const char *label, const unsigned char *data, size_t len) {
+    printf("%s: ", label);
+    for (size_t i = 0; i < len; ++i) {
+        printf("%02X ", data[i]);
+    }
+    printf("\n");
+}
+
+// RSA functions
+int modular(int base, unsigned int exp, unsigned int mod) {
+    int x = 1;
+    int i;
+    int power = base % mod;
+
+    for (i = 0; i < sizeof(int) * 8; i++) {
+        int least_sig_bit = 0x00000001 & (exp >> i);
+        if (least_sig_bit)
+            x = (x * power) % mod;
+        power = (power * power) % mod;
+    }
+
+    return x;
+}
+
+int modInverse(int a, int m) {
+    int m0 = m;
+    int y = 0, x = 1;
+
+    if (m == 1)
+        return 0;
+
+    while (a > 1) {
+        int q = a / m;
+        int t = m;
+        m = a % m, a = t;
+        t = y;
+        y = x - q * y;
+        x = t;
+    }
+
+    if (x < 0)
+        x += m0;
+
+    return x;
+}
+
+int gcd(int a, int b) {
+    if (a == 0 || b == 0)
+        return 0;
+    if (a == b)
+        return a;
+    if (a > b)
+        return gcd(a - b, b);
+    return gcd(a, b - a);
+}
+
+int lcm(int a, int b) {
+    return (a * b) / gcd(a, b);
+}
+
+int isPrime(int n) {
+    int flag = 1;
+    for (int i = 2; i <= sqrt(n); i++) {
+        if (n % i == 0) {
+            flag = 0;
+            return flag;
+        }
+    }
+    return flag;
+}
+
+// Helper function to print RSA Encrypted AES Key in hexadecimal
+void print_rsa_encrypted_key(const long long int *key, size_t len) {
+    printf("RSA Encrypted AES Key: ");
+    for (size_t i = 0; i < len; ++i) {
+        printf("%llX ", key[i]);
+    }
+    printf("\n");
+}
+
+// Main Decryption Logic for Receiver
+int main() {
+    // AES Initialization
+    mbedtls_aes_context aes;
+    mbedtls_aes_init(&aes);
+
+    unsigned char rsa_decrypted_key[32];
+    unsigned char ciphertext[16] = {
+        0x76, 0x49, 0xAB, 0xAC, 0x81, 0x19, 0xB2, 0x46,
+        0xCE, 0xE9, 0x8E, 0x9B, 0x12, 0xE9, 0x19, 0x7D
+    }; // Example ciphertext
+    unsigned char decrypted[16];
+
+    int p = 13; // Prime number for RSA (same as sender)
+    int q = 17; // Prime number for RSA (same as sender)
+    int n = p * q;
+    int phi = (p - 1) * (q - 1);
+    int lambda = lcm(p - 1, q - 1);
+    int e = 5; // Public exponent for RSA (same as sender)
+    int d = modInverse(e, lambda); // Private exponent for RSA
+
+    long long int rsa_encrypted_key[32] = {
+        0x1223, 0x1247, 0x0E23, 0x0D67, 0x1A45, 0x0B23, 0x1623, 0x1A34,
+        0x0B56, 0x1823, 0x1D45, 0x0E67, 0x1234, 0x1A23, 0x0B45, 0x1623,
+        0x1B56, 0x1823, 0x0A45, 0x0E67, 0x1247, 0x0D45, 0x0B23, 0x1623,
+        0x1A23, 0x0E34, 0x1B56, 0x1245, 0x1D23, 0x0E45, 0x0A23, 0x0B56
+    }; // Example RSA Encrypted AES Key
+
+    // Decrypt AES Key with RSA
+    for (int i = 0; i < 32; ++i) {
+        rsa_decrypted_key[i] = modular(rsa_encrypted_key[i], d, n);
+    }
+
+    // Verify if decryption was successful
+    // (In a real scenario, compare with the original AES key)
+    // Here, just printing the decrypted key
+    print_hex("RSA Decrypted AES Key", rsa_decrypted_key, 32);
+
+    // AES Decryption
+    if (mbedtls_aes_setkey_dec(&aes, rsa_decrypted_key, 256) != 0) {
+        printf("Setting decryption key failed\n");
+        return -1;
+    }
+
+    mbedtls_aes_decrypt(&aes, ciphertext, decrypted);
+    print_hex("Decrypted", decrypted, 16);
+
+    mbedtls_aes_free(&aes);
+
+    return 0;
+}
