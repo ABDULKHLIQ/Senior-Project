@@ -1,0 +1,192 @@
+#include <cstdio>
+#include <cstring>
+#include <cmath> // Include the cmath header
+#include <iostream>
+#include <vector>
+#include <cstdlib>
+#include <ctime>
+#include "mbedtls/aes.h"
+
+// Helper function to print data in hexadecimal format
+void print_hex(const char *label, const unsigned char *data, size_t len) {
+    printf("%s: ", label);
+    for (size_t i = 0; i < len; ++i) {
+        printf("%02X ", data[i]);
+    }
+    printf("\n");
+}
+
+// RSA functions
+int modular(int base, unsigned int exp, unsigned int mod) {
+    int x = 1;
+    int i;
+    int power = base % mod;
+
+    for (i = 0; i < sizeof(int) * 8; i++) {
+        int least_sig_bit = 0x00000001 & (exp >> i);
+        if (least_sig_bit)
+            x = (x * power) % mod;
+        power = (power * power) % mod;
+    }
+
+    return x;
+}
+
+int modInverse(int a, int m) {
+    int m0 = m;
+    int y = 0, x = 1;
+
+    if (m == 1)
+        return 0;
+
+    while (a > 1) {
+        int q = a / m;
+        int t = m;
+        m = a % m, a = t;
+        t = y;
+        y = x - q * y;
+        x = t;
+    }
+
+    if (x < 0)
+        x += m0;
+
+    return x;
+}
+
+int gcd(int a, int b) {
+    if (a == 0 || b == 0)
+        return 0;
+    if (a == b)
+        return a;
+    if (a > b)
+        return gcd(a - b, b);
+    return gcd(a, b - a);
+}
+
+int lcm(int a, int b) {
+    return (a * b) / gcd(a, b);
+}
+
+int isPrime(int n) {
+    int flag = 1;
+    for (int i = 2; i <= sqrt(n); i++) { // sqrt function requires cmath
+        if (n % i == 0) {
+            flag = 0;
+            return flag;
+        }
+    }
+    return flag;
+}
+
+// Helper function to print RSA Encrypted AES Key in hexadecimal
+void print_rsa_encrypted_key(const long long int *key, size_t len) {
+    printf("RSA Encrypted AES Key: ");
+    for (size_t i = 0; i < len; ++i) {
+        printf("%llX ", key[i]);
+    }
+    printf("\n");
+}
+
+// Main Combined Encryption-Decryption Logic
+int main() {
+    // AES Initialization
+    mbedtls_aes_context aes;
+    mbedtls_aes_init(&aes);
+
+    unsigned char key[32] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F
+    };
+
+    unsigned char plaintext[17] = "HelloWorld12345"; // 15 characters + null terminator
+    unsigned char ciphertext[16];
+    unsigned char decrypted[16];
+
+    int p, q, n, phi, lambda, e, d;
+    std::vector<int> primes;
+
+    srand(time(NULL)); // Seed the random number generator
+
+    // Generate two prime numbers
+    while (primes.size() < 2) {
+        int prime = rand() % 40 + 3;
+        if (isPrime(prime)) {
+            primes.push_back(prime);
+        }
+    }
+
+    p = primes[0];
+    q = primes[1];
+    n = p * q;
+    phi = (p - 1) * (q - 1);
+    lambda = lcm(p - 1, q - 1);
+
+    std::vector<int> coprimes;
+    for (int i = 3; i < lambda; i++) {
+        if (gcd(i, lambda) == 1) {
+            coprimes.push_back(i);
+        }
+    }
+
+    e = coprimes[rand() % coprimes.size()];
+    d = modInverse(e, lambda);
+
+    std::cout << "RSA Public Key: (" << n << ", " << e << ")\n";
+    std::cout << "RSA Private Key: " << d << "\n";
+
+    long long int rsa_encrypted_key[32];
+    unsigned char rsa_decrypted_key[32];
+
+    while (true) {
+        // AES Encryption
+        if (mbedtls_aes_setkey_enc(&aes, key, 256) != 0) {
+            printf("Setting encryption key failed\n");
+            return -1;
+        }
+
+        mbedtls_aes_encrypt(&aes, plaintext, ciphertext);
+        print_hex("Plaintext", plaintext, 16);
+        print_hex("Ciphertext", ciphertext, 16);
+
+        // Encrypt AES Key with RSA
+        for (int i = 0; i < 32; ++i) {
+            rsa_encrypted_key[i] = modular(key[i], e, n);
+        }
+
+        // Print RSA Encrypted AES Key
+        print_rsa_encrypted_key(rsa_encrypted_key, 32);
+
+        // Decrypt AES Key with RSA
+        for (int i = 0; i < 32; ++i) {
+            rsa_decrypted_key[i] = modular(rsa_encrypted_key[i], d, n);
+        }
+
+        // Verify if decryption was successful
+        if (memcmp(key, rsa_decrypted_key, 32) == 0) {
+            std::cout << "RSA Decryption Successful\n";
+        } else {
+            std::cout << "RSA Decryption Failed\n";
+        }
+
+        // AES Decryption
+        if (mbedtls_aes_setkey_dec(&aes, rsa_decrypted_key, 256) != 0) {
+            printf("Setting decryption key failed\n");
+            return -1;
+        }
+
+        mbedtls_aes_decrypt(&aes, ciphertext, decrypted);
+        print_hex("Decrypted", decrypted, 16);
+
+        std::cout << "\n";
+
+        // Optional: Add a delay if output is too fast
+        // std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+    mbedtls_aes_free(&aes);
+
+    return 0;
+}
